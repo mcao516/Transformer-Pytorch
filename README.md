@@ -1,2 +1,2 @@
 # Transformer-Pytorch
-Implementing "Transformer" (Attention is all you need) using PyTorch
+Implementing "Transformer" (Attention Is All You Need) using PyTorch
