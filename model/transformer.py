@@ -55,6 +55,31 @@ class EmbeddingLayer(nn.Module):
         return self.dropout(e)
 
 
+class Encoder(nn.Module):
+    """The encoder is composed of a stack of N = 6 identical layers.
+    """
+    def __init__(self, d_model, N, head_num, d_ff, dropout=0.1, last_norm=True):
+        super(Encoder, self).__init__()
+        self.N = N
+        self.layers = clones(EncoderLayer(MultiHeadAttentioin(d_model, head_num, dropout=dropout),
+                                          LayerNorm(d_model),
+                                          FeedForward(d_model, d_ff, dropout=dropout)), N)
+        self.norm = LayerNorm(d_model) if last_norm else None
+
+    def forward(self, x, mask):
+        """Forward through N identical layers.
+
+        Args:
+            x: [batch_size, seq_len, d_model]
+            mask: [batch_size, 1, seq_len]
+        """
+        for layer in self.layers:
+            x = layer(x, mask)
+        x = self.norm(x) if self.norm else x
+
+        return x
+
+
 class EncoderLayer(nn.Module):
     """Implement one encoder layer.
     """
@@ -92,7 +117,6 @@ class MultiHeadAttentioin(nn.Module):
     """
     def __init__(self, d_model, head_num, dropout=0.1):
         super(MultiHeadAttentioin, self).__init__()
-        # multi-head attention
         assert d_model % head_num == 0, "d_model must be divisible by head_num"
 
         self.d_model = d_model
@@ -104,6 +128,7 @@ class MultiHeadAttentioin(nn.Module):
         self.W_K = nn.Linear(d_model, head_num * self.d_k)
         self.W_V = nn.Linear(d_model, head_num * self.d_k)
         self.W_O = nn.Linear(d_model, d_model)
+
         self.dropout = nn.Dropout(dropout)
 
     def scaled_dp_attn(self, query, key, value, mask=None):
@@ -154,6 +179,7 @@ class MultiHeadAttentioin(nn.Module):
 
         # Concat(head_1, ..., head_n)W_O
         y = self.W_O(heads)
+
         assert y.shape == q.shape
         return y
 
@@ -170,7 +196,7 @@ class LayerNorm(nn.Module):
     def forward(self, x):
         mean = x.mean(-1, keepdim=True)
         std = x.std(-1, keepdim=True)
-        x = (x - mean) / (std + self.self.eps)
+        x = (x - mean) / (std + self.eps)
         return self.g * x + self.b
 
 
@@ -201,31 +227,6 @@ class FeedForward(nn.Module):
         """
         y = self.ffn_2(self.dropout(self.act(self.ffn_1(x))))
         return y
-
-
-class Encoder(nn.Module):
-    """The encoder is composed of a stack of N = 6 identical layers.
-    """
-    def __init__(self, d_model, N, head_num, d_ff, dropout=0.1, last_norm=True):
-        super(Encoder, self).__init__()
-        self.N = N
-        self.layers = clones(EncoderLayer(MultiHeadAttentioin(d_model, head_num, dropout=dropout),
-                                          LayerNorm(d_model),
-                                          FeedForward(d_model, d_ff, dropout=dropout)), N)
-        self.norm = LayerNorm(d_model) if last_norm else None
-
-    def forward(self, x, mask):
-        """Forward through N identical layers.
-
-        Args:
-            x: [batch_size, seq_len, d_model]
-            mask: [batch_size, 1, seq_len]
-        """
-        for layer in self.layers:
-            x = layer(x, mask)
-        x = self.norm(x) if self.norm else x
-
-        return x
 
 
 class DecoderLayer(nn.Module):
