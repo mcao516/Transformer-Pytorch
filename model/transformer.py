@@ -13,6 +13,12 @@ import math
 import copy
 
 
+def clones(module, N):
+    """Clone N identical layers.
+    """
+    return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
+
+
 class PositionalEncoding(nn.Module):
     """Implement the position embedding function.
     """
@@ -52,11 +58,13 @@ class EmbeddingLayer(nn.Module):
 class EncoderLayer(nn.Module):
     """Implement one encoder layer.
     """
-    def __init__(self, attn, norm, feed_forward):
+    def __init__(self, attn, norm, feed_forward, dropout=0.1):
         super(EncoderLayer, self).__init__()
         self.attn = attn
         self.norm = norm
         self.feed_forward = feed_forward
+
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, mask):
         """Forward through one encoder layer: multi-head attn => add & norm
@@ -69,11 +77,11 @@ class EncoderLayer(nn.Module):
         """
         # multihead attn & norm
         a = self.attn(x, x, x, mask)
-        t = self.norm(x + a)
+        t = self.norm(x + self.dropout(a))
 
         # feed forward & norm
-        z = self.feed_forward(t)  # dropout(linear(act(linear(x))))
-        y = self.norm(t + z)
+        z = self.feed_forward(t)  # linear(dropout(act(linear(x)))))
+        y = self.norm(t + self.dropout(z))
 
         assert x.shape == y.shape
         return y
@@ -96,7 +104,6 @@ class MultiHeadAttentioin(nn.Module):
         self.W_K = nn.Linear(d_model, head_num * self.d_k)
         self.W_V = nn.Linear(d_model, head_num * self.d_k)
         self.W_O = nn.Linear(d_model, d_model)
-
         self.dropout = nn.Dropout(dropout)
 
     def scaled_dp_attn(self, query, key, value, mask=None):
@@ -148,22 +155,22 @@ class MultiHeadAttentioin(nn.Module):
         # Concat(head_1, ..., head_n)W_O
         y = self.W_O(heads)
         assert y.shape == q.shape
-        return self.dropout(y)
+        return y
 
 
 class LayerNorm(nn.Module):
     """Construct a layernorm module.
     """
-    def __init__(self, layer_size, e=1e-5):
+    def __init__(self, layer_size, eps=1e-5):
         super(LayerNorm, self).__init__()
         self.g = nn.Parameter(torch.ones(layer_size))
         self.b = nn.Parameter(torch.zeros(layer_size))
-        self.e = e
+        self.eps = eps
 
     def forward(self, x):
         mean = x.mean(-1, keepdim=True)
         std = x.std(-1, keepdim=True)
-        x = (x - mean) / (std + self.e)
+        x = (x - mean) / (std + self.self.eps)
         return self.g * x + self.b
 
 
@@ -184,7 +191,7 @@ class FeedForward(nn.Module):
         elif act == 'rrelu':
             self.act = nn.RReLU()
         else:
-            self.act = nn.ReLU()
+            raise ValueError("Unknown activation function type.")
 
     def forward(self, x):
         """FFN(x) = max(0, xW_1 + b_1)W_2 + b_2
@@ -192,26 +199,20 @@ class FeedForward(nn.Module):
         Args:
             x: [batch_size, seq_len, d_model]
         """
-        h = self.act(self.ffn_1(x))
-        y = self.ffn_2(h)
-        return self.dropout(y)
-
-
-def clones(module, N):
-    """Clone N identical layers.
-    """
-    return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
+        y = self.ffn_2(self.dropout(self.act(self.ffn_1(x))))
+        return y
 
 
 class Encoder(nn.Module):
     """The encoder is composed of a stack of N = 6 identical layers.
     """
-    def __init__(self, d_model, N, head_num, d_ff, dropout=0.1):
+    def __init__(self, d_model, N, head_num, d_ff, dropout=0.1, last_norm=True):
         super(Encoder, self).__init__()
         self.N = N
         self.layers = clones(EncoderLayer(MultiHeadAttentioin(d_model, head_num, dropout=dropout),
                                           LayerNorm(d_model),
                                           FeedForward(d_model, d_ff, dropout=dropout)), N)
+        self.norm = LayerNorm(d_model) if last_norm else None
 
     def forward(self, x, mask):
         """Forward through N identical layers.
@@ -222,18 +223,22 @@ class Encoder(nn.Module):
         """
         for layer in self.layers:
             x = layer(x, mask)
+        x = self.norm(x) if self.norm else x
+
         return x
 
 
 class DecoderLayer(nn.Module):
     """Implement one decoder layer.
     """
-    def __init__(self, self_attn, ed_attn, feed_forward, norm):
+    def __init__(self, self_attn, ed_attn, feed_forward, norm, dropout=0.1):
         super(DecoderLayer, self).__init__()
         self.self_attn = self_attn
         self.ed_attn = ed_attn
         self.feed_forward = feed_forward
         self.norm = norm
+
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, mask, memory, src_mask):
         """Forward through a decoder: self attn & norm =>
@@ -241,15 +246,15 @@ class DecoderLayer(nn.Module):
         """
         # self-attn & norm
         a_1 = self.self_attn(x, x, x, mask)
-        t_1 = self.norm(x + a_1)
+        t_1 = self.norm(x + self.dropout(a_1))
 
         # encoder-decoder attn & norm
         a_2 = self.ed_attn(t_1, memory, memory, src_mask)
-        t_2 = self.norm(t_1 + a_2)
+        t_2 = self.norm(t_1 + self.dropout(a_2))
 
         # feed forward & norm
         h = self.feed_forward(t_2)
-        y = self.norm(t_2 + h)
+        y = self.norm(t_2 + self.dropout(h))
 
         assert x.shape == y.shape
         return y
@@ -258,12 +263,13 @@ class DecoderLayer(nn.Module):
 class Decoder(nn.Module):
     """Implement Transformer decoder.
     """
-    def __init__(self, d_model, N, head_num, d_ff, dropout=0.1):
+    def __init__(self, d_model, N, head_num, d_ff, dropout=0.1, last_norm=True):
         super(Decoder, self).__init__()
         self.layers = clones(DecoderLayer(MultiHeadAttentioin(d_model, head_num, dropout=dropout),
                                           MultiHeadAttentioin(d_model, head_num, dropout=dropout),
                                           FeedForward(d_model, d_ff, dropout=dropout),
                                           LayerNorm(d_model)), N)
+        self.norm = LayerNorm(d_model) if last_norm else None
 
     def forward(self, x, mask, memory, src_mask):
         """Forward through N identical decoder layers.
@@ -276,6 +282,8 @@ class Decoder(nn.Module):
         """
         for layer in self.layers:
             x = layer(x, mask, memory, src_mask)
+        x = self.norm(x) if self.norm else x
+
         return x
 
 
