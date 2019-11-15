@@ -144,7 +144,7 @@ class MultiHeadAttentioin(nn.Module):
 
         # scores: [batch_size, head_num, seq_len, seq_len]
         scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(self.d_k)
-        if mask:
+        if mask is not None:
             assert mask.ndim == 3, "Mask shape doesn't seem right..."
             mask = mask.unsqueeze(1)
             scores = scores.masked_fill(mask == 0, -1e9)
