@@ -62,8 +62,9 @@ class Encoder(nn.Module):
         super(Encoder, self).__init__()
         self.N = N
         self.layers = clones(EncoderLayer(MultiHeadAttentioin(d_model, head_num, dropout=dropout),
+                                          FeedForward(d_model, d_ff, dropout=dropout),
                                           LayerNorm(d_model),
-                                          FeedForward(d_model, d_ff, dropout=dropout)), N)
+                                          LayerNorm(d_model)), N)
         self.norm = LayerNorm(d_model) if last_norm else None
 
     def forward(self, x, mask):
@@ -83,13 +84,14 @@ class Encoder(nn.Module):
 class EncoderLayer(nn.Module):
     """Implement one encoder layer.
     """
-    def __init__(self, attn, norm, feed_forward, dropout=0.1):
+    def __init__(self, attn, feed_forward, norm1, norm2, dropout=0.1):
         super(EncoderLayer, self).__init__()
         self.attn = attn
-        self.norm = norm
         self.feed_forward = feed_forward
+        self.norm1, self.norm2 = norm1, norm2
 
-        self.dropout = nn.Dropout(dropout)
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
 
     def forward(self, x, mask):
         """Forward through one encoder layer: multi-head attn => add & norm
@@ -102,11 +104,11 @@ class EncoderLayer(nn.Module):
         """
         # multihead attn & norm
         a = self.attn(x, x, x, mask)
-        t = self.norm(x + self.dropout(a))
+        t = self.norm1(x + self.dropout1(a))
 
         # feed forward & norm
         z = self.feed_forward(t)  # linear(dropout(act(linear(x)))))
-        y = self.norm(t + self.dropout(z))
+        y = self.norm2(t + self.dropout2(z))
 
         assert x.shape == y.shape
         return y
@@ -232,14 +234,16 @@ class FeedForward(nn.Module):
 class DecoderLayer(nn.Module):
     """Implement one decoder layer.
     """
-    def __init__(self, self_attn, ed_attn, feed_forward, norm, dropout=0.1):
+    def __init__(self, self_attn, ed_attn, feed_forward, norm1, norm2, norm3, dropout=0.1):
         super(DecoderLayer, self).__init__()
         self.self_attn = self_attn
         self.ed_attn = ed_attn
         self.feed_forward = feed_forward
-        self.norm = norm
+        self.norm1, self.norm2, self.norm3 = norm1, norm2, norm3
 
-        self.dropout = nn.Dropout(dropout)
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+        self.dropout3 = nn.Dropout(dropout)
 
     def forward(self, x, mask, memory, src_mask):
         """Forward through a decoder: self attn & norm =>
@@ -247,15 +251,15 @@ class DecoderLayer(nn.Module):
         """
         # self-attn & norm
         a_1 = self.self_attn(x, x, x, mask)
-        t_1 = self.norm(x + self.dropout(a_1))
+        t_1 = self.norm1(x + self.dropout1(a_1))
 
         # encoder-decoder attn & norm
         a_2 = self.ed_attn(t_1, memory, memory, src_mask)
-        t_2 = self.norm(t_1 + self.dropout(a_2))
+        t_2 = self.norm2(t_1 + self.dropout2(a_2))
 
         # feed forward & norm
         h = self.feed_forward(t_2)
-        y = self.norm(t_2 + self.dropout(h))
+        y = self.norm3(t_2 + self.dropout3(h))
 
         assert x.shape == y.shape, "Input and output shape should be the same!"
         return y
@@ -269,6 +273,8 @@ class Decoder(nn.Module):
         self.layers = clones(DecoderLayer(MultiHeadAttentioin(d_model, head_num, dropout=dropout),
                                           MultiHeadAttentioin(d_model, head_num, dropout=dropout),
                                           FeedForward(d_model, d_ff, dropout=dropout),
+                                          LayerNorm(d_model),
+                                          LayerNorm(d_model),
                                           LayerNorm(d_model)), N)
         self.norm = LayerNorm(d_model) if last_norm else None
 
