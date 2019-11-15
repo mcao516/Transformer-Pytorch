@@ -28,7 +28,7 @@ class PositionalEncoding(nn.Module):
         pe = torch.zeros(max_len, d_model)
         # position: [max_len, 1]
         position = torch.arange(0., max_len).unsqueeze(1)
-        # div_term: [d_model/2]
+        # div_term: [d_model / 2]
         div_term = torch.exp(torch.arange(0., d_model, 2) * -(math.log(10000.0) / d_model))
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
@@ -40,7 +40,7 @@ class PositionalEncoding(nn.Module):
 
 
 class EmbeddingLayer(nn.Module):
-    """Inplement the embedding layer.
+    """Inplement embedding layer.
     """
     def __init__(self, d_model, vocab_size, dropout=0.1):
         super(EmbeddingLayer, self).__init__()
@@ -144,8 +144,8 @@ class MultiHeadAttentioin(nn.Module):
 
         # scores: [batch_size, head_num, seq_len, seq_len]
         scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(self.d_k)
-        if mask is not None:
-            assert len(mask.shape) == 3
+        if mask:
+            assert mask.ndim == 3, "Mask shape doesn't seem right..."
             mask = mask.unsqueeze(1)
             scores = scores.masked_fill(mask == 0, -1e9)
 
@@ -257,7 +257,7 @@ class DecoderLayer(nn.Module):
         h = self.feed_forward(t_2)
         y = self.norm(t_2 + self.dropout(h))
 
-        assert x.shape == y.shape
+        assert x.shape == y.shape, "Input and output shape should be the same!"
         return y
 
 
@@ -293,8 +293,6 @@ class LinearSoftmax(nn.Module):
     """
     def __init__(self, d_model, vocab):
         super(LinearSoftmax, self).__init__()
-        self.d_model = d_model
-        self.vocab = vocab
         self.proj = nn.Linear(d_model, vocab)
 
     def forward(self, x, prob=True):
